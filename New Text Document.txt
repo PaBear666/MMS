@@ -1,0 +1,145 @@
+#include <inttypes.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
+
+
+//  1110 
+//	1101
+// 	1011
+// 	0111
+float minValueChannel[15] = {	2.4, 1.5, 1.5, 1.5,
+											1.5, 1.5, 1.5, 1.5, 
+											1.5, 1.5, 1.5, 1.5,
+											1.5, 1.5, 1.5, 1.5};
+
+float maxValueChannel[15] = {3, 2, 2, 2,
+											2, 2, 2, 2, 
+											2, 2, 2, 2,
+											2, 2, 2};
+float faultADC = 0.005;
+int portState[4]= {0xEF,0xDF,0xBF,0x7F};
+int inputState[4]={0x01,0x02,0x04,0x08};
+int cankeyChannel = 0;
+int keyChannel = 0xFF;
+int adcChannel = 0xFF;
+
+
+void readyGiveADCResult(void)
+{
+
+}
+
+void keyboardPolling(void)                                                                                                                                                                                                                                                                                                                                                                                                                      
+{ 
+int i = 0;
+int j = 0;
+    for(i=0; i<4; i++)
+    {
+		PORTC = portState[i];
+
+		for(j=0; j<4; j++)
+		{ 
+			if(((PINC&inputState[j])==0))
+			{
+				while(((PINC&inputState[j])==0)) {}
+				if(((4 * j) + i + 1) < 16)
+				{
+					keyChannel  = (4 * j) + i + 1;
+					cankeyChannel = 1;
+				}
+
+			}
+		} 
+    }
+}
+
+// Timer 2 output compare interrupt service routine
+ISR(TIMER0_OVF_vect)
+{
+	keyboardPolling();
+}
+
+
+void turnOn_Diod(void)
+{
+	int leftPos = (keyChannel - 1) % 4;
+	int rightPos = (keyChannel - 1) / 4 ;
+	PORTB =  (0xF0  ^ (0X80 >> leftPos)) | (1 << rightPos);
+}
+
+void resetDiods(void)
+{
+	PORTB =  0x00;
+}
+
+
+ISR(ADC_vect)
+{
+	int bitAdcValue = ADC;
+	float	adcValue = bitAdcValue * faultADC;
+	if(adcValue > minValueChannel[keyChannel - 1]  && adcValue < maxValueChannel[keyChannel - 1])
+	{
+		resetDiods();
+		readyGiveADCResult();
+	}	
+	else
+	{
+		turnOn_Diod();
+	}
+}
+
+void init_T0(void)
+{
+	TIMSK = 0b00000001;
+	TIFR = 0b00000011;
+	TCCR0 = 0b00000001;
+}
+
+// 0.005
+void init_ADC(void)
+{
+	ADCSRA = (1 << ADEN) | (1 << ADIE);
+}
+
+void init_Ports(void)
+{
+	DDRA = 0x00;
+	DDRC = 0b11110000;
+	DDRB = 0b11111111;
+	DDRD |= (1 << 5) | (1 << 6) | (1 << 7);
+}
+
+void readVoltADC(void)
+{
+	ADMUX  = adcChannel - 1;
+	ADCSRA  |= (1 << ADSC);
+}
+
+int main()
+ { 
+	cli();
+	init_ADC();
+	init_Ports();
+	init_T0();
+	sei();
+
+   // Write your code here
+   while (1)
+	{	
+			if(cankeyChannel == 1)
+			{
+				cankeyChannel = 0;
+				adcChannel = keyChannel;
+				if(keyChannel > 7)
+				{
+					PORTD = (adcChannel - 8) << 5;
+					adcChannel = 8;	
+				}
+				readVoltADC();
+			}
+	}
+
+      
+   return 0;
+ }
